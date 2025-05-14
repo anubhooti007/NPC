@@ -61,6 +61,7 @@ odds_parlay = o1 * o2 * o3 * 0.97  # net of 3% fee
 p_parlay = p1 * p2 * p3
 liability = (odds_parlay - 1) * stake
 
+# Page logic
 if page == "CVaR & Buffer Sizing":
     st.header("CVaR Method & Insurance Buffer Sizing")
     st.markdown("We simulate **100,000** parlays to estimate the 99% VaR and CVaR.")
@@ -69,30 +70,18 @@ if page == "CVaR & Buffer Sizing":
     cvar99 = pnl[pnl <= var99].mean()
     var_abs = var99 * stake
     cvar_abs = cvar99 * stake
-    buffer_abs = cvar_abs
     col1, col2, col3 = st.columns(3)
-    col1.metric("99% VaR (for your stake)", f"${-var_abs:,.2f}")
-    col2.metric("99% CVaR (for your stake)", f"${-cvar_abs:,.2f}")
-    col3.metric("Buffer Required (total)", f"${-buffer_abs:,.2f}")
+    col1.metric("99% VaR (per $ stake)", f"${-var_abs:,.2f}")
+    col2.metric("99% CVaR (per $ stake)", f"${-cvar_abs:,.2f}")
+    col3.metric("Buffer Required (per $ stake)", f"${-cvar_abs:,.2f}")
     fig = px.histogram(pnl, x=pnl, nbins=100, title="P&L Distribution (100k trials)")
-    fig.add_vline(x=var99, line_color="red", annotation_text="VaR 99%")
+    fig.add_vline(x=var99, line_color="red", annotation_text="VaR 99%", annotation_position="top left")
     st.plotly_chart(fig, use_container_width=True)
     st.markdown(f"**Bet Acceptance Gate:** Ensure buffer ≤ capital × γ = ${capital*gamma:.2f}.")
-    if -cvar99 * stake > capital * gamma:
+    if -cvar_abs > capital * gamma:
         st.error("⚠️ CVaR buffer exceeds cap. Throttle new parlays.")
     else:
         st.success("✅ CVaR buffer is within cap.")
-    st.markdown("---")
-    st.subheader("Kelly Criterion Bet Sizing Example")
-    p, b, q = p_parlay, odds_parlay - 1, 1 - p_parlay
-    f_star = (b * p - q) / b if b > 0 else 0.0
-    kelly_cap_frac = max(0.0, f_star)
-    safe_payout = kelly_cap_frac * capital
-    max_bet = safe_payout / odds_parlay if odds_parlay > 0 else 0
-    col_k1, col_k2, col_k3 = st.columns(3)
-    col_k1.metric("Kelly Fraction", f"{kelly_cap_frac:.2%}")
-    col_k2.metric("Max Safe Payout ($)", f"${safe_payout:,.2f}")
-    col_k3.metric("Max Bet Allowed ($)", f"${max_bet:,.2f}")
 elif page == "Drawdown & Ruin":
     st.header("Drawdown Rule & Risk-of-Ruin")
     st.markdown("Simulate sequences to estimate max drawdown and ruin probability.")
@@ -102,14 +91,12 @@ elif page == "Drawdown & Ruin":
     col1, col2 = st.columns(2)
     col1.metric("Risk of Ruin", f"{prob_ruin:.2%}")
     col2.metric("Max Drawdown", f"{max_dd:.2%}")
-    st.markdown("If Risk-of-Ruin > 0.1%, tighten CVaR or pause parlays.")
     if prob_ruin > 0.001:
         st.warning("⚠️ High ruin risk! Tighten parameters.")
     if max_dd > 0.25:
         st.warning("⚠️ Drawdown > 25%. Halve Kelly, lower γ.")
 elif page == "Tranche Allocation":
     st.header("Tranche-Based Capital Allocation")
-    st.markdown("Divide the LP capital into senior and junior tranches with distinct risk/return profiles.")
     senior_pct = st.slider("Senior Tranche % of LP", 0, 100, 70) / 100
     senior_cap = senior_pct * capital
     junior_cap = capital - senior_cap
@@ -149,10 +136,9 @@ elif page == "Limits & Controls":
 elif page == "Hedging Strategies":
     st.header("Hedging Strategies")
     st.markdown("Explore parlay hedges via single-leg and multi-leg approaches.")
-
-    # -- Delta-Neutral Replication --
+    # Delta-Neutral Replication
     st.subheader("1. Delta-Neutral Replication")
-    col1, col2 = st.columns([1,1])
+    col1, col2 = st.columns(2)
     with col1:
         delta = st.slider("Leg 1 Probability Shift Δ", -0.2, 0.2, 0.0, key="hedge_delta")
         p_other = p2 * p3
@@ -170,13 +156,12 @@ elif page == "Hedging Strategies":
         fig.update_layout(height=300)
         st.plotly_chart(fig)
     st.markdown("---")
-
-    # -- Martingale Hedging --
+    # Martingale Hedging
     st.subheader("2. Martingale Hedging")
     st.markdown("""
 Place incremental hedges after each successful leg using a simplified martingale approach:
 1. Start with a base hedge equal to original stake.
-2. After each winning leg, double the hedge on the next leg’s needed outcome (same side as the parlay).
+2. After each winning leg, double the hedge on the next leg’s opposite outcome to lock in your original stake.
 3. Caps ensure you never exceed a predefined max hedge size.
 """)
     base_hedge = st.number_input("Base Hedge Amount ($)", min_value=1.0, value=stake)
@@ -184,28 +169,40 @@ Place incremental hedges after each successful leg using a simplified martingale
     legs_won = st.slider("Number of consecutive legs won", 0, 3, 0)
     hedge_martingale = min(base_hedge * (2 ** legs_won), max_hedge)
     st.metric("Martingale Hedge for Next Leg", f"${hedge_martingale:,.2f}")
-    st.caption(f"After {legs_won} wins: hedge = min({base_hedge}*2**{legs_won}, cap {max_hedge})")
-    st.markdown(f"**Action:** If you’ve won {legs_won} legs, place **${hedge_martingale:,.2f}** on the same outcome the user needs to offset your payout.")
+    st.caption(f"After {legs_won} wins: hedge = min({base_hedge}×2^{legs_won}, cap {max_hedge})")
+    st.markdown(f"**Action:** If you’ve won {legs_won} legs, place **${hedge_martingale:,.2f}** opposite the next leg to recover losses and secure your base stake.")
     st.markdown("---")
-
-    # -- Kelly-Optimal Hedge Sizing --
-    st.subheader("3. Kelly-Optimal Hedge Sizing")
-    o_hedge = st.number_input("Hedge Odds (decimal)", 1.01, 10.0, 2.0)
-    p_loss = 1 - p_parlay  # probability parlay fails?
-    b_hedge = o_hedge - 1
-    f_hedge = (b_hedge * p_loss - p_parlay) / b_hedge if b_hedge > 0 else 0.0
-    f_hedge = max(0.0, f_hedge)
-    h_kelly = f_hedge * capital
-    st.metric("Kelly Hedge Amount ($)", f"${h_kelly:,.2f}")
-    st.caption(f"Fraction f* = (b·p_loss - p_parlay) / b = {f_hedge:.2%} of capital")
-    st.markdown("**Note:** This stake size balances risk and growth by maximizing expected log wealth on the hedge.")
-
+    # Quantile Hedging (Föllmer–Leukert)
+    st.subheader("4. Quantile Hedging (Föllmer–Leukert)")
+    st.markdown(
+        "Identify the two legs with the highest payout volatility (p·(1-p)), then allocate a fixed hedge budget across them to maximize the chance of covering shortfalls."
+    )
+    q_budget = 2000.0
+    q_target = st.slider("Success Probability (1 - ε)", 0.90, 1.00, 0.995, step=0.005)
+    legs = pd.DataFrame({
+        "Leg": ["Leg1", "Leg2", "Leg3"],
+        "WinProb": [p1, p2, p3],
+        "Odds": [o1, o2, o3]
+    })
+    legs["Volatility"] = legs.WinProb * (1 - legs.WinProb)
+    legs = legs.sort_values("Volatility", ascending=False).reset_index(drop=True)
+    top = legs.head(2)
+    total_vol = top.Volatility.sum()
+    top["HedgeAmount"] = (top.Volatility / total_vol) * q_budget
+    legs = legs.merge(top[["Leg","HedgeAmount"]], on="Leg", how="left").fillna(0)
+    st.table(legs[["Leg","WinProb","Odds","Volatility","HedgeAmount"]]
+             .rename(columns={"WinProb":"Win Prob","Odds":"Odds","HedgeAmount":"$ Hedge"}))
+    est_success = 1 - np.prod(top.WinProb.values)
+    st.metric("Estimated Success P", f"{est_success:.2%}")
+    if est_success < q_target:
+        st.warning("⚠️ Budget insufficient for target coverage – enlarge budget or relax target.")
+    else:
+        st.success("✅ Hedge budget meets coverage target.")
 elif page == "Summary":
-
     st.title("Summary & Next Steps")
     st.write("- **CVaR**: worst-tail buffer sizing.")
     st.write("- **Drawdown/Ruin**: sequence risk controls.")
     st.write("- **Tranches**: hierarchical capital protection.")
     st.write("- **Limits**: payout, stake, exposure, stop-loss.")
-    st.write("- **Hedging**: delta-neutral, martingale methodologies integrated.")
+    st.write("- **Hedging**: delta-neutral, martingale, quantile methodologies integrated.")
     st.write("**Combine these modules** to build a robust parlay risk system.")
