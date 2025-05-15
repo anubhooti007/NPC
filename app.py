@@ -236,7 +236,7 @@ Place incremental hedges after each successful leg using a simplified martingale
     st.markdown(f"**Action:** If you’ve won {legs_won} legs, place **${hedge_martingale:,.2f}** on the same outcome as the next leg to hedge exposure and secure your base stake.")
     st.markdown("---")
     # Quantile Hedging (Föllmer–Leukert)
-    st.subheader("4. Quantile Hedging (Föllmer–Leukert)")
+    st.subheader("3. Quantile Hedging (Föllmer–Leukert)")
     st.markdown(
         "Identify the two legs with the highest payout volatility (p·(1-p)), then allocate a fixed hedge budget across them to maximize the chance of covering shortfalls."
     )
