@@ -115,7 +115,7 @@ elif page == "Drawdown & Ruin":
     if max_dd > 0.25:
         st.warning("⚠️ Drawdown > 25%. Halve Kelly, lower γ.")
     st.markdown("---")
-    st.subheader("Quick Kelly Criterion & Insights")
+    st.subheader("Kelly Criterion & Insights")
     st.markdown(
         """
         The **Kelly Criterion** estimates the optimal fraction of capital to risk on this parlay
