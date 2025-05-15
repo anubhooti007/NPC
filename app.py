@@ -7,12 +7,19 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Competi Parlay Risk Dashboard", layout="wide")
 
-# -- Monte Carlo Simulation for P&L --
+# -- Monte Carlo Simulation for LP P&L (House perspective) --
 @st.cache_data
-def run_monte_carlo(p, odds, stake, n_trials=100000):
+def run_monte_carlo_lp(p, odds, stake, n_trials=100_000):
+    """
+    Simulate the LP's profit & loss per $stake.
+    - If the parlay wins (prob=p), LP pays out (odds-1)*stake => a loss.
+    - If the parlay loses (prob=1-p), LP keeps the stake => a profit of stake.
+    """
     outcomes = np.random.rand(n_trials) < p
-    pnl = np.where(outcomes, (odds - 1) * stake, -stake)
-    return pnl
+    pnl_lp = np.where(outcomes,
+                      - (odds - 1) * stake,
+                      + stake)
+    return pnl_lp
 
 # -- Drawdown & Ruin Simulation --
 def simulate_bankroll_runs(p, odds, stake, capital, n_seq=50, n_runs=10000):
@@ -59,29 +66,41 @@ gamma = st.sidebar.slider("Exposure Cap γ (%)", 0.1, 10.0, 1.0) / 100
 # Derived parlay parameters
 odds_parlay = o1 * o2 * o3 * 0.97  # net of 3% fee
 p_parlay = p1 * p2 * p3
-liability = (odds_parlay - 1) * stake
+liability = (odds_parlay - 1) * stake  # net payout on win
 
-# Page logic
 if page == "CVaR & Buffer Sizing":
-    st.header("CVaR Method & Insurance Buffer Sizing")
-    st.markdown("We simulate **100,000** parlays to estimate the 99% VaR and CVaR.")
-    pnl = run_monte_carlo(p_parlay, odds_parlay, stake)
-    var99 = np.percentile(pnl, 1)
-    cvar99 = pnl[pnl <= var99].mean()
-    var_abs = var99 * stake
-    cvar_abs = cvar99 * stake
+    st.header("CVaR Method & Insurance Buffer Sizing (LP Perspective)")
+    st.markdown(
+        """
+        We simulate **100,000** parlays from the **LP’s point of view**:
+        - On a bettor win (prob = p), the LP **loses** the payout (−\$(odds−1) per $1).
+        - On a bettor loss (prob = 1−p), the LP **gains** the stake (+\$1 per $1).
+        
+        We then compute:
+        - **99% VaR**: the LP loss not exceeded in 99% of trials (1% worst outcomes).
+        - **99% CVaR**: the *average* LP loss within that worst 1% tail.
+        """
+    )
+    pnl_lp = run_monte_carlo_lp(p_parlay, odds_parlay, stake)
+    var99_lp = np.percentile(pnl_lp, 1)
+    cvar99_lp = pnl_lp[pnl_lp <= var99_lp].mean()
+
     col1, col2, col3 = st.columns(3)
-    col1.metric("99% VaR (per $ stake)", f"${-var_abs:,.2f}")
-    col2.metric("99% CVaR (per $ stake)", f"${-cvar_abs:,.2f}")
-    col3.metric("Buffer Required (per $ stake)", f"${-cvar_abs:,.2f}")
-    fig = px.histogram(pnl, x=pnl, nbins=100, title="P&L Distribution (100k trials)")
-    fig.add_vline(x=var99, line_color="red", annotation_text="VaR 99%", annotation_position="top left")
+    col1.metric("99% VaR (LP P&L)", f"${var99_lp:,.2f}")
+    col2.metric("99% CVaR (LP P&L)", f"${cvar99_lp:,.2f}")
+    col3.metric("Buffer Required per $1 staked", f"${-cvar99_lp:,.2f}")
+
+    fig = px.histogram(pnl_lp, x=pnl_lp, nbins=100, title="LP P&L Distribution (100k trials)")
+    fig.add_vline(x=var99_lp, line_color="red", annotation_text="VaR 99%", annotation_position="top left")
     st.plotly_chart(fig, use_container_width=True)
-    st.markdown(f"**Bet Acceptance Gate:** Ensure buffer ≤ capital × γ = ${capital*gamma:.2f}.")
-    if -cvar_abs > capital * gamma:
+
+    st.markdown(f"**Bet Acceptance Gate:** Ensure buffer ≤ capital × γ = ${capital*gamma:,.2f}.")
+    buffer_req = -cvar99_lp * stake
+    if buffer_req > capital * gamma:
         st.error("⚠️ CVaR buffer exceeds cap. Throttle new parlays.")
     else:
         st.success("✅ CVaR buffer is within cap.")
+
 elif page == "Drawdown & Ruin":
     st.header("Drawdown Rule & Risk-of-Ruin")
     st.markdown("Simulate sequences to estimate max drawdown and ruin probability.")
@@ -95,10 +114,8 @@ elif page == "Drawdown & Ruin":
         st.warning("⚠️ High ruin risk! Tighten parameters.")
     if max_dd > 0.25:
         st.warning("⚠️ Drawdown > 25%. Halve Kelly, lower γ.")
-        # Quick Kelly Criterion check
     st.markdown("---")
-    st.subheader("Kelly Criterion & Insights")
-    # Kelly description
+    st.subheader("Quick Kelly Criterion & Insights")
     st.markdown(
         """
         The **Kelly Criterion** estimates the optimal fraction of capital to risk on this parlay
@@ -113,36 +130,27 @@ elif page == "Drawdown & Ruin":
         - **f*** < 0 : negative edge, avoid betting
         """
     )
-    # Compute Kelly values
     b = odds_parlay - 1
-    p = p_parlay
-    f_star = max(0.0, (b * p - (1 - p)) / b) if b > 0 else 0.0
-    # Dollar stakes and payouts
+    f_star = max(0.0, (b * p_parlay - (1 - p_parlay)) / b) if b > 0 else 0.0
     stake_kelly = f_star * capital
     payout_kelly = stake_kelly * (1 + b)
     half_kelly = stake_kelly / 2
-
-            # Display metrics
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Kelly Fraction (f*)", f"{f_star:.2%}", help="Fraction of LP capital to risk")
     col2.metric("Max Safe Payout ($)", f"${stake_kelly:,.2f}", help="Max pool payout exposure")
     col3.metric("Max Bet Allowed ($)", f"${(stake_kelly/odds_parlay):,.2f}", help="Max bet at parlay odds")
     col4.metric("Max Payout at Kelly ($)", f"${payout_kelly:,.2f}")
-    # Additional insights
     st.markdown(
-    f"- **Half-Kelly Stake:** ${half_kelly:,.2f} (conservative sizing)\n"
-    f"- **Current Exposure Cap (γ):** ${gamma * capital:,.2f}\n"
-    f"- You’d be risking {f_star:.2%} of the pool vs a cap of {gamma:.2%}."
-)
-    # Warn if user stake exceeds Kelly max bet
-    max_bet_allowed = stake_kelly / odds_parlay if odds_parlay>0 else 0
+        f"- **Half-Kelly Stake:** ${half_kelly:,.2f} (conservative sizing)\n"
+        f"- **Current Exposure Cap (γ):** ${gamma * capital:,.2f}\n"
+        f"- You’d be risking {f_star:.2%} of the pool vs a cap of {gamma:.2%}."
+    )
+    max_bet_allowed = stake_kelly / odds_parlay if odds_parlay > 0 else 0
     if stake > max_bet_allowed:
         st.warning(
             f"⚠️ Your configured stake (${stake:,.2f}) exceeds the Kelly max bet allowed of ${max_bet_allowed:,.2f}. "
             "Consider lowering the stake or using a fractional Kelly approach."
         )
-    # Continue to next section
-    
 
 elif page == "Tranche Allocation":
     st.header("Tranche-Based Capital Allocation")
@@ -151,12 +159,17 @@ elif page == "Tranche Allocation":
     junior_cap = capital - senior_cap
     st.metric("Senior Tranche", f"${senior_cap:,.2f}")
     st.metric("Junior Tranche", f"${junior_cap:,.2f}")
-    payout_demand = st.number_input("Payout Demand ($)", min_value=0.0, value=25000.0)
+
+    payout_demand = st.number_input("Payout Demand ($)", min_value=0.0, value=0.0)
     loss_junior = min(payout_demand, junior_cap)
-    loss_senior = max(0, payout_demand - junior_cap)
-    junior_end = junior_cap - loss_junior
-    senior_end = senior_cap - loss_senior
-    st.write(f"After ${payout_demand:,.2f} payout: Junior=${junior_end:,.2f}, Senior=${senior_end:,.2f}")
+    loss_senior = max(0.0, payout_demand - junior_cap)
+    junior_remaining = junior_cap - loss_junior
+    senior_remaining = senior_cap - loss_senior
+
+    st.write(f"After ${payout_demand:,.2f} payout:")
+    st.write(f"- Junior Tranche remaining: ${junior_remaining:,.2f}")
+    st.write(f"- Senior Tranche remaining: ${senior_remaining:,.2f}")
+
 elif page == "Limits & Controls":
     st.header("Limits & Controls")
     st.subheader("Maximum Payout Limits")
@@ -182,6 +195,7 @@ elif page == "Limits & Controls":
         st.error("⚠️ p×L exceeds cap; hedge excess.")
     else:
         st.success("✅ p×L within cap.")
+
 elif page == "Hedging Strategies":
     st.header("Hedging Strategies")
     st.markdown("Explore parlay hedges via single-leg and multi-leg approaches.")
@@ -222,7 +236,7 @@ Place incremental hedges after each successful leg using a simplified martingale
     st.markdown(f"**Action:** If you’ve won {legs_won} legs, place **${hedge_martingale:,.2f}** opposite the next leg to recover losses and secure your base stake.")
     st.markdown("---")
     # Quantile Hedging (Föllmer–Leukert)
-    st.subheader("3. Quantile Hedging (Föllmer–Leukert)")
+    st.subheader("4. Quantile Hedging (Föllmer–Leukert)")
     st.markdown(
         "Identify the two legs with the highest payout volatility (p·(1-p)), then allocate a fixed hedge budget across them to maximize the chance of covering shortfalls."
     )
@@ -247,8 +261,9 @@ Place incremental hedges after each successful leg using a simplified martingale
         st.warning("⚠️ Budget insufficient for target coverage – enlarge budget or relax target.")
     else:
         st.success("✅ Hedge budget meets coverage target.")
+
 elif page == "Summary":
-    st.title("Summary")
+    st.title("Summary & Next Steps")
     st.write("- **CVaR**: worst-tail buffer sizing.")
     st.write("- **Drawdown/Ruin**: sequence risk controls.")
     st.write("- **Tranches**: hierarchical capital protection.")
