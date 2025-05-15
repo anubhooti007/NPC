@@ -233,7 +233,7 @@ Place incremental hedges after each successful leg using a simplified martingale
     hedge_martingale = min(base_hedge * (2 ** legs_won), max_hedge)
     st.metric("Martingale Hedge for Next Leg", f"${hedge_martingale:,.2f}")
     st.caption(f"After {legs_won} wins: hedge = min({base_hedge}×2^{legs_won}, cap {max_hedge})")
-    st.markdown(f"**Action:** If you’ve won {legs_won} legs, place **${hedge_martingale:,.2f}** opposite the next leg to recover losses and secure your base stake.")
+    st.markdown(f"**Action:** If you’ve won {legs_won} legs, place **${hedge_martingale:,.2f}** on the same outcome as the next leg to hedge exposure and secure your base stake.")
     st.markdown("---")
     # Quantile Hedging (Föllmer–Leukert)
     st.subheader("4. Quantile Hedging (Föllmer–Leukert)")
