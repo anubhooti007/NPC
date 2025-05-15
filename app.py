@@ -69,7 +69,7 @@ p_parlay = p1 * p2 * p3
 liability = (odds_parlay - 1) * stake  # net payout on win
 
 if page == "CVaR & Buffer Sizing":
-    st.header("CVaR Method & Insurance Buffer Sizing (LP Perspective)")
+    st.header("CVaR Method & Insurance Buffer Sizing")
     st.markdown(
         """
         We simulate **100,000** parlays from the **LP’s point of view**:
