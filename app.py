@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Competi Parlay Risk Dashboard", layout="wide")
 
-# -- Monte Carlo Simulation for LP P&L (House perspective) --
+# -- Monte Carlo Simulation for LP P&L --
 @st.cache_data
 def run_monte_carlo_lp(p, odds, stake, n_trials=100_000):
     """
