@@ -95,6 +95,55 @@ elif page == "Drawdown & Ruin":
         st.warning("⚠️ High ruin risk! Tighten parameters.")
     if max_dd > 0.25:
         st.warning("⚠️ Drawdown > 25%. Halve Kelly, lower γ.")
+        # Quick Kelly Criterion check
+    st.markdown("---")
+    st.subheader("Kelly Criterion & Insights")
+    # Kelly description
+    st.markdown(
+        """
+        The **Kelly Criterion** estimates the optimal fraction of capital to risk on this parlay
+        to maximize long-term growth: f* = (b·p - (1-p)) / b,
+        where:
+        - **p** = parlay win probability
+        - **b** = net payout odds (total odds − 1)
+        
+        **Interpretation:**
+        - **f*** > 0 : you have a positive edge
+        - **f*** = 0 : break-even, no edge
+        - **f*** < 0 : negative edge, avoid betting
+        """
+    )
+    # Compute Kelly values
+    b = odds_parlay - 1
+    p = p_parlay
+    f_star = max(0.0, (b * p - (1 - p)) / b) if b > 0 else 0.0
+    # Dollar stakes and payouts
+    stake_kelly = f_star * capital
+    payout_kelly = stake_kelly * (1 + b)
+    half_kelly = stake_kelly / 2
+
+            # Display metrics
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Kelly Fraction (f*)", f"{f_star:.2%}", help="Fraction of LP capital to risk")
+    col2.metric("Max Safe Payout ($)", f"${stake_kelly:,.2f}", help="Max pool payout exposure")
+    col3.metric("Max Bet Allowed ($)", f"${(stake_kelly/odds_parlay):,.2f}", help="Max bet at parlay odds")
+    col4.metric("Max Payout at Kelly ($)", f"${payout_kelly:,.2f}")
+    # Additional insights
+    st.markdown(
+    f"- **Half-Kelly Stake:** ${half_kelly:,.2f} (conservative sizing)\n"
+    f"- **Current Exposure Cap (γ):** ${gamma * capital:,.2f}\n"
+    f"- You’d be risking {f_star:.2%} of the pool vs a cap of {gamma:.2%}."
+)
+    # Warn if user stake exceeds Kelly max bet
+    max_bet_allowed = stake_kelly / odds_parlay if odds_parlay>0 else 0
+    if stake > max_bet_allowed:
+        st.warning(
+            f"⚠️ Your configured stake (${stake:,.2f}) exceeds the Kelly max bet allowed of ${max_bet_allowed:,.2f}. "
+            "Consider lowering the stake or using a fractional Kelly approach."
+        )
+    # Continue to next section
+    
+
 elif page == "Tranche Allocation":
     st.header("Tranche-Based Capital Allocation")
     senior_pct = st.slider("Senior Tranche % of LP", 0, 100, 70) / 100
@@ -102,7 +151,7 @@ elif page == "Tranche Allocation":
     junior_cap = capital - senior_cap
     st.metric("Senior Tranche", f"${senior_cap:,.2f}")
     st.metric("Junior Tranche", f"${junior_cap:,.2f}")
-    payout_demand = st.number_input("Payout Demand ($)", min_value=0.0, value=250000.0)
+    payout_demand = st.number_input("Payout Demand ($)", min_value=0.0, value=25000.0)
     loss_junior = min(payout_demand, junior_cap)
     loss_senior = max(0, payout_demand - junior_cap)
     junior_end = junior_cap - loss_junior
@@ -173,7 +222,7 @@ Place incremental hedges after each successful leg using a simplified martingale
     st.markdown(f"**Action:** If you’ve won {legs_won} legs, place **${hedge_martingale:,.2f}** opposite the next leg to recover losses and secure your base stake.")
     st.markdown("---")
     # Quantile Hedging (Föllmer–Leukert)
-    st.subheader("4. Quantile Hedging (Föllmer–Leukert)")
+    st.subheader("3. Quantile Hedging (Föllmer–Leukert)")
     st.markdown(
         "Identify the two legs with the highest payout volatility (p·(1-p)), then allocate a fixed hedge budget across them to maximize the chance of covering shortfalls."
     )
@@ -199,7 +248,7 @@ Place incremental hedges after each successful leg using a simplified martingale
     else:
         st.success("✅ Hedge budget meets coverage target.")
 elif page == "Summary":
-    st.title("Summary & Next Steps")
+    st.title("Summary")
     st.write("- **CVaR**: worst-tail buffer sizing.")
     st.write("- **Drawdown/Ruin**: sequence risk controls.")
     st.write("- **Tranches**: hierarchical capital protection.")
